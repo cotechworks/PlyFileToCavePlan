@@ -13,7 +13,6 @@ import random
 from typing import Optional
 
 import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 
 try:
     import tkinter as tk

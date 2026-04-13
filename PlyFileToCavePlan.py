@@ -15,24 +15,8 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
-from typing import List, Tuple, Optional
-import sys
-import json
 
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-import random
-from plyfile_utils import (
-	parse_xyz,
-	parse_ply,
-	parse_file,
-	plot_xy,
-	create_figure,
-)
-
-# GUI entrypoint was moved to `plyfile_gui.py` as `launch_gui`.
-# Importing the function here so CLI or other callers can use it.
+from plyfile_utils import parse_file, plot_xy
 from plyfile_gui import launch_gui
 
 
