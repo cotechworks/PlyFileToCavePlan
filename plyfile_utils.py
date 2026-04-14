@@ -287,7 +287,9 @@ def plot_xy(xs: List[float], ys: List[float], zs: Optional[List[float]] = None, 
             fig.colorbar(hb, ax=ax).set_label("count")
 
     if outpath:
-        fig.tight_layout()
+        # 固定余白を使ってプロット領域をキャンバスいっぱいにする
+        # 値は比率（0.0-1.0）。必要に応じて調整してください。
+        fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
         plt.savefig(outpath, dpi=200)
         print(f"Saved plot to: {outpath}")
         plt.close(fig)
@@ -332,4 +334,7 @@ def create_figure(xs: List[float], ys: List[float], zs: Optional[List[float]] = 
         ax.set_title(title)
     ax.grid(True)
     ax.set_aspect("equal", adjustable="datalim")
+    # キャンバス内の余白を固定（比率）にして、グラフ領域をキャンバスいっぱいに広げる
+    # 必要に応じてこの値を調整してください（left,right,top,bottom）。
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
     return fig
