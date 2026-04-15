@@ -1294,6 +1294,31 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     state["xs"] = xs
                     state["ys"] = ys
                     state["zs"] = zs
+                    # ensure any previously added overlay points are cleared
+                    try:
+                        vm = state.get("vm")
+                        if vm is not None:
+                            vm.set_points([])
+                            # rebuild/clear the Treeview from the (now-empty) ViewModel
+                            try:
+                                from plyfile_view import populate_tree_from_vm
+
+                                tbl = state.get("points_table")
+                                if tbl is not None:
+                                    state["added_points"] = populate_tree_from_vm(tbl, vm)
+                            except Exception:
+                                try:
+                                    for item in list(state.get("points_table").get_children()):
+                                        try:
+                                            state["points_table"].delete(item)
+                                        except Exception:
+                                            pass
+                                    state["added_points"] = []
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
                     if cancel_event.is_set():
                         messagebox.showinfo("中断", "読み込みがキャンセルされました")
                     else:
