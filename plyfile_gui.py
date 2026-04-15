@@ -1118,22 +1118,8 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             except Exception:
                 do_replace = False
 
-            # read CSV and add rows to table/state
-            added = []
-            if do_replace:
-                # clear existing points and table
-                try:
-                    for item in list(state.get("points_table").get_children()):
-                        try:
-                            state["points_table"].delete(item)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                try:
-                    state["added_points"] = []
-                except Exception:
-                    state["added_points"] = []
+            # read CSV into a temporary list of points (x,y)
+            points_list = []
             with open(p, "r", encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
                 # skip header if present
@@ -1141,10 +1127,7 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                 for row in reader:
                     if first:
                         first = False
-                        # check if header-like
-                        if len(row) >= 2 and (
-                            row[0].strip().lower() == "x" or not _is_number(row[0])
-                        ):
+                        if len(row) >= 2 and (row[0].strip().lower() == "x" or not _is_number(row[0])):
                             continue
                     if not row:
                         continue
@@ -1153,20 +1136,46 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                         y = float(row[1])
                     except Exception:
                         continue
-                    item_id = state["points_table"].insert(
-                        "", "end", values=(f"{x:.6f}", f"{y:.6f}", "")
-                    )
-                    ap = {"x": x, "y": y, "item": item_id}
-                    state["added_points"].append(ap)
-                    added.append(ap)
-            if not added:
+                    points_list.append({"x": x, "y": y})
+
+            if not points_list:
                 messagebox.showinfo("情報", "インポートできる行がありませんでした")
                 return
-            # sync viewmodel with newly imported points
+
+            # synchronize with ViewModel: replace or append
             try:
                 vm = state.get("vm")
                 if vm is not None:
-                    vm.set_points([{"x": p["x"], "y": p["y"]} for p in state.get("added_points", [])])
+                    if do_replace:
+                        vm.set_points(points_list)
+                    else:
+                        for pt in points_list:
+                            try:
+                                vm.append_point(pt["x"], pt["y"])
+                            except Exception:
+                                pass
+                    # rebuild table from ViewModel using helper
+                    try:
+                        from plyfile_view import populate_tree_from_vm
+
+                        tbl = state.get("points_table")
+                        if tbl is not None:
+                            state["added_points"] = populate_tree_from_vm(tbl, vm)
+                    except Exception:
+                        # fallback: construct state from vm directly
+                        try:
+                            pts = vm.get_points()
+                            new_added = []
+                            tbl = state.get("points_table")
+                            for p in pts:
+                                try:
+                                    item_id = tbl.insert("", "end", values=(f"{p['x']:.6f}", f"{p['y']:.6f}", ""))
+                                    new_added.append({"x": p["x"], "y": p["y"], "item": item_id})
+                                except Exception:
+                                    pass
+                            state["added_points"] = new_added
+                        except Exception:
+                            pass
             except Exception:
                 pass
             # update overlay and visuals
