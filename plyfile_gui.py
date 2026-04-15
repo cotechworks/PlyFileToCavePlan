@@ -935,22 +935,16 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
             # rebuild tree to match viewmodel points
             try:
-                for item in list(state.get("points_table").get_children()):
-                    try:
-                        state["points_table"].delete(item)
-                    except Exception:
-                        pass
-                pts = state.get("vm").get_points()
-                new_added = []
-                for p in pts:
-                    try:
-                        item_id = state["points_table"].insert(
-                            "", "end", values=(f"{p['x']:.6f}", f"{p['y']:.6f}", "")
-                        )
-                        new_added.append({"x": p["x"], "y": p["y"], "item": item_id})
-                    except Exception:
-                        pass
-                state["added_points"] = new_added
+                # rebuild tree from ViewModel using helper
+                try:
+                    from plyfile_view import populate_tree_from_vm
+
+                    tbl = state.get("points_table")
+                    vm = state.get("vm")
+                    if tbl is not None and vm is not None:
+                        state["added_points"] = populate_tree_from_vm(tbl, vm)
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -1010,22 +1004,15 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
             # rebuild tree from viewmodel points
             try:
-                for item in list(state.get("points_table").get_children()):
-                    try:
-                        state["points_table"].delete(item)
-                    except Exception:
-                        pass
-                pts = state.get("vm").get_points()
-                new_added = []
-                for p in pts:
-                    try:
-                        item_id = state["points_table"].insert(
-                            "", "end", values=(f"{p['x']:.6f}", f"{p['y']:.6f}", "")
-                        )
-                        new_added.append({"x": p["x"], "y": p["y"], "item": item_id})
-                    except Exception:
-                        pass
-                state["added_points"] = new_added
+                try:
+                    from plyfile_view import populate_tree_from_vm
+
+                    tbl = state.get("points_table")
+                    vm = state.get("vm")
+                    if tbl is not None and vm is not None:
+                        state["added_points"] = populate_tree_from_vm(tbl, vm)
+                except Exception:
+                    pass
             except Exception:
                 pass
 
