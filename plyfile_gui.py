@@ -1262,12 +1262,17 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
         for w in progress_frame.winfo_children():
             w.destroy()
-        prog = ttk.Progressbar(progress_frame, mode="determinate")
-        prog.pack(fill=tk.X, expand=1, side=tk.LEFT)
-        lbl_prog = ttk.Label(progress_frame, text="0%", width=6)
+        # layout: a top row with the progress bar and percent label, and
+        # the Cancel button placed beneath the progress row
+        prog_row = ttk.Frame(progress_frame)
+        prog = ttk.Progressbar(prog_row, mode="determinate")
+        prog.pack(side=tk.LEFT, fill=tk.X, expand=1)
+        lbl_prog = ttk.Label(prog_row, text="0%", width=6)
         lbl_prog.pack(side=tk.LEFT, padx=6)
+        prog_row.pack(fill=tk.X, expand=1)
+
         btn_cancel = ttk.Button(progress_frame, text="Cancel", command=cancel_event.set)
-        btn_cancel.pack(side=tk.LEFT)
+        btn_cancel.pack(fill=tk.X, pady=(6, 0))
 
         def progress_cb(pct: float):
             def _update():
@@ -1661,9 +1666,9 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
         pass
 
     btn_preview = ttk.Button(left_ctrl_frame, text="Preview", command=do_preview)
-    btn_preview.grid(row=3, column=0, pady=8)
+    btn_preview.grid(row=8, column=0, pady=8)
     btn_save = ttk.Button(left_ctrl_frame, text="Save PNG", command=do_save)
-    btn_save.grid(row=3, column=1, pady=8, sticky=tk.W)
+    btn_save.grid(row=8, column=1, pady=8, sticky=tk.W)
 
     # Now that remove_selected_points and undo_remove are defined, create their buttons
     try:
@@ -1786,8 +1791,7 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
     except Exception:
         pass
 
-    btn_quit = ttk.Button(left_ctrl_frame, text="Quit", command=root.destroy)
-    btn_quit.grid(row=8, column=0, columnspan=2, pady=8)
+    # Quit button removed per user request
 
     root.geometry("800x600")
     root.mainloop()
