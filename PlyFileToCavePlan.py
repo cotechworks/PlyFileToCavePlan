@@ -13,6 +13,9 @@ PLY/XYZファイルを読み込み、XY座標を2Dでプロットします。
 """
 from __future__ import annotations
 
+# Application version — defined here so other modules (GUI) can reuse it.
+VERSION = "2.1"
+
 import argparse
 import os
 import csv

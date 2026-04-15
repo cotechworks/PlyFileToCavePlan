@@ -75,7 +75,13 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
     state["vm"] = vm
 
     root = tk.Tk()
-    root.title("PlyFileToCavePlan - GUI")
+    # Read version defined in PlyFileToCavePlan.py if available
+    try:
+        from PlyFileToCavePlan import VERSION as APP_VERSION
+
+    except Exception:
+        APP_VERSION = "dev"
+    root.title(f"PlyFileToCavePlan - v{APP_VERSION}")
 
     frm = ttk.Frame(root, padding=8)
     frm.grid(row=0, column=0, sticky=tk.NSEW)
