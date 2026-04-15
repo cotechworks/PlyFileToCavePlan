@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from plyfile_utils import parse_file, plot_xy
+from plyfile_model import parse_file, plot_xy
 from plyfile_gui import launch_gui
 
 

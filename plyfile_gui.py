@@ -3,6 +3,7 @@
 Contains `launch_gui(initial_dir=None)` which starts the Tkinter GUI.
 This module imports tkinter and matplotlib's TkAgg backend only when needed.
 """
+
 from __future__ import annotations
 
 import os
@@ -21,11 +22,22 @@ try:
     import tkinter as tk
     from tkinter import filedialog, ttk, messagebox
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
     TK_AVAILABLE = True
 except Exception:
     TK_AVAILABLE = False
 
-from plyfile_utils import parse_file, create_figure
+from plyfile_model import (
+    load_config,
+    save_config,
+    parse_with_progress,
+    export_points_csv,
+    import_points_csv,
+    get_config_path,
+    create_figure,
+    parse_file,
+    plot_xy,
+)
 
 
 def launch_gui(initial_dir: Optional[str] = None) -> None:
@@ -38,44 +50,17 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
         return
 
     def _get_config_path() -> str:
-        if getattr(sys, "frozen", False):
-            base = os.path.dirname(sys.executable)
-        else:
-            base = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(base, "plyfiletocaveplan_config.json")
+        # Delegate to the model implementation so there's a single source
+        # of truth for the config file location.
+        return get_config_path()
 
     def _load_config() -> dict:
-        path = _get_config_path()
-        defaults = {
-            "point_size": 1.0,
-            "downsample": 50000,
-            "cmap": "jet",
-            "plot_mode": "scatter",
-            "gridsize": 50,
-            "last_dir": None,
-            "line_color": "black",
-            "line_width": 1.0,
-            "point_color": "red",
-            "highlight_color": "blue",
-            "overlay_point_size": 40,
-        }
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for k, v in defaults.items():
-                    if k not in data:
-                        data[k] = v
-                return data
-        except Exception:
-            return defaults
+        # Use the model's config loader
+        return load_config()
 
     def _save_config(cfg: dict) -> None:
-        path = _get_config_path()
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+        # Delegate saving to the model
+        save_config(cfg)
 
     state = {
         "path": None,
@@ -131,8 +116,14 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
     # set right table column to weight 0 to maximize canvas width
     display_frame.columnconfigure(2, weight=0)
     lbl_table = ttk.Label(table_frame, text="Added points:")
-    lbl_table.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0,4))
-    tree = ttk.Treeview(table_frame, columns=("x", "y", "len"), show="headings", height=5, selectmode="extended")
+    lbl_table.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 4))
+    tree = ttk.Treeview(
+        table_frame,
+        columns=("x", "y", "len"),
+        show="headings",
+        height=5,
+        selectmode="extended",
+    )
     tree.heading("x", text="X")
     tree.heading("y", text="Y")
     tree.heading("len", text="Len")
@@ -165,6 +156,7 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
         # attach click handler to canvas and store connection id
         try:
             ax = fig.axes[0] if fig.axes else None
+
             def _onclick(event):
                 if event.inaxes is None or event.button != 1:
                     return
@@ -174,7 +166,9 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     return
                 # insert into tree and state
                 try:
-                    item_id = state["points_table"].insert("", "end", values=(f"{x:.6f}", f"{y:.6f}", ""))
+                    item_id = state["points_table"].insert(
+                        "", "end", values=(f"{x:.6f}", f"{y:.6f}", "")
+                    )
                     state["added_points"].append({"x": x, "y": y, "item": item_id})
                 except Exception:
                     pass
@@ -193,7 +187,11 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                             overlay.set_offsets(offsets)
                             # update sizes according to overlay size control
                             try:
-                                size_val = float(sp_overlay_point_size.get()) if sp_overlay_point_size is not None else cfg.get("overlay_point_size", 40)
+                                size_val = (
+                                    float(sp_overlay_point_size.get())
+                                    if sp_overlay_point_size is not None
+                                    else cfg.get("overlay_point_size", 40)
+                                )
                                 overlay.set_sizes(np.full((len(pts),), size_val))
                             except Exception:
                                 pass
@@ -211,9 +209,17 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     else:
                         # fallback: draw single point using configured point color and size
                         try:
-                            pc = cmb_point_color.get() if cmb_point_color is not None else "red"
+                            pc = (
+                                cmb_point_color.get()
+                                if cmb_point_color is not None
+                                else "red"
+                            )
                             try:
-                                size_val = float(sp_overlay_point_size.get()) if sp_overlay_point_size is not None else cfg.get("overlay_point_size", 40)
+                                size_val = (
+                                    float(sp_overlay_point_size.get())
+                                    if sp_overlay_point_size is not None
+                                    else cfg.get("overlay_point_size", 40)
+                                )
                             except Exception:
                                 size_val = cfg.get("overlay_point_size", 40)
                             ax.scatter([x], [y], c=pc, s=size_val, zorder=100)
@@ -222,6 +228,7 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                             pass
                 except Exception:
                     pass
+
             cid = canvas.mpl_connect("button_press_event", _onclick)
             state["mpl_cid"] = cid
         except Exception:
@@ -229,10 +236,17 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
     def _rebuild_canvas_with_added_points(canvas_parent, xs2, ys2, zs2):
         # create new figure for underlying data and plot added red points
-        fig2 = create_figure(xs2, ys2, zs2, title=os.path.basename(state.get("path", "")),
-                             cmap=cmb_cmap.get(), point_size=float(sp_point_size.get()) if sp_point_size.get() else 1.0,
-                             plot_mode=("hexbin" if var_hex.get() else "scatter"), gridsize=int(sp_gridsize.get()) if sp_gridsize.get() else 50,
-                             downsample=None)
+        fig2 = create_figure(
+            xs2,
+            ys2,
+            zs2,
+            title=os.path.basename(state.get("path", "")),
+            cmap=cmb_cmap.get(),
+            point_size=float(sp_point_size.get()) if sp_point_size.get() else 1.0,
+            plot_mode=("hexbin" if var_hex.get() else "scatter"),
+            gridsize=int(sp_gridsize.get()) if sp_gridsize.get() else 50,
+            downsample=None,
+        )
         # destroy previous canvas widget if any
         try:
             old_canvas = state.get("canvas_widget")
@@ -261,7 +275,11 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             ax2 = fig2.axes[0] if fig2.axes else None
             if ax2 is not None:
                 try:
-                    size_val = float(sp_overlay_point_size.get()) if sp_overlay_point_size is not None else cfg.get("overlay_point_size", 40)
+                    size_val = (
+                        float(sp_overlay_point_size.get())
+                        if sp_overlay_point_size is not None
+                        else cfg.get("overlay_point_size", 40)
+                    )
                 except Exception:
                     size_val = cfg.get("overlay_point_size", 40)
                 overlay = ax2.scatter([], [], c="red", s=size_val, zorder=100)
@@ -314,15 +332,27 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                 return
             # compute color arrays from widgets or defaults
             try:
-                base_color = mcolors.to_rgba(cmb_point_color.get()) if cmb_point_color is not None else (1.0, 0.0, 0.0, 1.0)
+                base_color = (
+                    mcolors.to_rgba(cmb_point_color.get())
+                    if cmb_point_color is not None
+                    else (1.0, 0.0, 0.0, 1.0)
+                )
             except Exception:
                 base_color = (1.0, 0.0, 0.0, 1.0)
             try:
-                hl_color = mcolors.to_rgba(cmb_highlight_color.get()) if cmb_highlight_color is not None else (0.0, 0.0, 1.0, 1.0)
+                hl_color = (
+                    mcolors.to_rgba(cmb_highlight_color.get())
+                    if cmb_highlight_color is not None
+                    else (0.0, 0.0, 1.0, 1.0)
+                )
             except Exception:
                 hl_color = (0.0, 0.0, 1.0, 1.0)
             cols = np.tile(np.array(base_color), (n, 1))
-            sel = set(state.get("points_table").selection()) if state.get("points_table") else set()
+            sel = (
+                set(state.get("points_table").selection())
+                if state.get("points_table")
+                else set()
+            )
             # mark selected as highlight color
             for i, ap in enumerate(pts):
                 try:
@@ -397,7 +427,10 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     item = ap.get("item")
                     if item:
                         length_str = f"{lens[i]:.6f}" if i > 0 else ""
-                        tbl.item(item, values=(f"{ap['x']:.6f}", f"{ap['y']:.6f}", length_str))
+                        tbl.item(
+                            item,
+                            values=(f"{ap['x']:.6f}", f"{ap['y']:.6f}", length_str),
+                        )
                 except Exception:
                     pass
 
@@ -418,14 +451,24 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     if n >= 2:
                         if line is None:
                             try:
-                                lc = mcolors.to_rgba(cmb_line_color.get()) if cmb_line_color is not None else "black"
+                                lc = (
+                                    mcolors.to_rgba(cmb_line_color.get())
+                                    if cmb_line_color is not None
+                                    else "black"
+                                )
                             except Exception:
                                 lc = "black"
                             try:
-                                lw = float(sp_line_width.get()) if sp_line_width is not None and sp_line_width.get() else 1.0
+                                lw = (
+                                    float(sp_line_width.get())
+                                    if sp_line_width is not None and sp_line_width.get()
+                                    else 1.0
+                                )
                             except Exception:
                                 lw = 1.0
-                            lineobj, = ax.plot(xs, ys, color=lc, linewidth=lw, zorder=90)
+                            (lineobj,) = ax.plot(
+                                xs, ys, color=lc, linewidth=lw, zorder=90
+                            )
                             state["line_artist"] = lineobj
                         else:
                             try:
@@ -434,12 +477,18 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                                 pass
                             try:
                                 if cmb_line_color is not None:
-                                    line.set_color(mcolors.to_rgba(cmb_line_color.get()))
+                                    line.set_color(
+                                        mcolors.to_rgba(cmb_line_color.get())
+                                    )
                             except Exception:
                                 pass
                             try:
                                 if sp_line_width is not None:
-                                    lw = float(sp_line_width.get()) if sp_line_width.get() else 1.0
+                                    lw = (
+                                        float(sp_line_width.get())
+                                        if sp_line_width.get()
+                                        else 1.0
+                                    )
                                     line.set_linewidth(lw)
                             except Exception:
                                 pass
@@ -502,7 +551,11 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             overlay = state.get("overlay")
             if overlay is not None and sp_overlay_point_size is not None:
                 try:
-                    size_val = float(sp_overlay_point_size.get()) if sp_overlay_point_size.get() else cfg.get("overlay_point_size", 40)
+                    size_val = (
+                        float(sp_overlay_point_size.get())
+                        if sp_overlay_point_size.get()
+                        else cfg.get("overlay_point_size", 40)
+                    )
                     n = len(state.get("added_points", []))
                     if n > 0:
                         overlay.set_sizes(np.full((n,), size_val))
@@ -522,23 +575,43 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
         try:
             cfg2 = _load_config()
             try:
-                cfg2["line_color"] = cmb_line_color.get() if cmb_line_color is not None else cfg2.get("line_color", "black")
+                cfg2["line_color"] = (
+                    cmb_line_color.get()
+                    if cmb_line_color is not None
+                    else cfg2.get("line_color", "black")
+                )
             except Exception:
                 pass
             try:
-                cfg2["line_width"] = float(sp_line_width.get()) if sp_line_width is not None and sp_line_width.get() else cfg2.get("line_width", 1.0)
+                cfg2["line_width"] = (
+                    float(sp_line_width.get())
+                    if sp_line_width is not None and sp_line_width.get()
+                    else cfg2.get("line_width", 1.0)
+                )
             except Exception:
                 pass
             try:
-                cfg2["point_color"] = cmb_point_color.get() if cmb_point_color is not None else cfg2.get("point_color", "red")
+                cfg2["point_color"] = (
+                    cmb_point_color.get()
+                    if cmb_point_color is not None
+                    else cfg2.get("point_color", "red")
+                )
             except Exception:
                 pass
             try:
-                cfg2["highlight_color"] = cmb_highlight_color.get() if cmb_highlight_color is not None else cfg2.get("highlight_color", "blue")
+                cfg2["highlight_color"] = (
+                    cmb_highlight_color.get()
+                    if cmb_highlight_color is not None
+                    else cfg2.get("highlight_color", "blue")
+                )
             except Exception:
                 pass
             try:
-                cfg2["overlay_point_size"] = float(sp_overlay_point_size.get()) if sp_overlay_point_size is not None and sp_overlay_point_size.get() else cfg2.get("overlay_point_size", 40)
+                cfg2["overlay_point_size"] = (
+                    float(sp_overlay_point_size.get())
+                    if sp_overlay_point_size is not None and sp_overlay_point_size.get()
+                    else cfg2.get("overlay_point_size", 40)
+                )
             except Exception:
                 pass
             _save_config(cfg2)
@@ -578,7 +651,7 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     continue
                 item = children[idx]
                 try:
-                    tbl.move(item, '', idx - 1)
+                    tbl.move(item, "", idx - 1)
                 except Exception:
                     pass
                 # update local children list to reflect move
@@ -600,7 +673,11 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                         except Exception:
                             pass
                         try:
-                            size_val = float(sp_overlay_point_size.get()) if sp_overlay_point_size is not None else cfg.get("overlay_point_size", 40)
+                            size_val = (
+                                float(sp_overlay_point_size.get())
+                                if sp_overlay_point_size is not None
+                                else cfg.get("overlay_point_size", 40)
+                            )
                             overlay.set_sizes(np.full((len(pts),), size_val))
                         except Exception:
                             pass
@@ -644,7 +721,7 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     continue
                 item = children[idx]
                 try:
-                    tbl.move(item, '', idx + 1)
+                    tbl.move(item, "", idx + 1)
                 except Exception:
                     pass
                 children.pop(idx)
@@ -663,7 +740,11 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                         except Exception:
                             pass
                         try:
-                            size_val = float(sp_overlay_point_size.get()) if sp_overlay_point_size is not None else cfg.get("overlay_point_size", 40)
+                            size_val = (
+                                float(sp_overlay_point_size.get())
+                                if sp_overlay_point_size is not None
+                                else cfg.get("overlay_point_size", 40)
+                            )
                             overlay.set_sizes(np.full((len(pts),), size_val))
                         except Exception:
                             pass
@@ -699,39 +780,40 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
     # Enable drag-and-drop reordering within the Treeview (supports multi-selection)
     try:
+
         def _on_tree_button_press(event):
             try:
                 item = tree.identify_row(event.y)
                 if not item:
-                    state.pop('dragging', None)
+                    state.pop("dragging", None)
                     return
                 sel = list(tree.selection())
                 if item in sel and sel:
                     # dragging current selection
-                    state['dragging'] = {'items': sel, 'last_target': None}
+                    state["dragging"] = {"items": sel, "last_target": None}
                 else:
                     # clicked a non-selected row: select it and drag single
                     try:
                         tree.selection_set(item)
                     except Exception:
                         pass
-                    state['dragging'] = {'items': [item], 'last_target': None}
+                    state["dragging"] = {"items": [item], "last_target": None}
             except Exception:
                 pass
 
         def _on_tree_b1_motion(event):
             try:
-                drag = state.get('dragging')
+                drag = state.get("dragging")
                 if not drag:
                     return
                 target = tree.identify_row(event.y)
                 if not target:
                     return
                 # avoid redundant work
-                if drag.get('last_target') == target:
+                if drag.get("last_target") == target:
                     return
                 children = list(tree.get_children())
-                items = drag.get('items', [])
+                items = drag.get("items", [])
                 # if target is one of the items, ignore
                 if target in items:
                     return
@@ -746,10 +828,10 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                 # apply new order
                 for idx, cid in enumerate(new_children):
                     try:
-                        tree.move(cid, '', idx)
+                        tree.move(cid, "", idx)
                     except Exception:
                         pass
-                drag['last_target'] = target
+                drag["last_target"] = target
                 # sync internal state and visuals
                 try:
                     _reorder_state_from_tree()
@@ -768,28 +850,28 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
         def _on_tree_button_release(event):
             try:
-                if 'dragging' in state:
-                    state.pop('dragging', None)
+                if "dragging" in state:
+                    state.pop("dragging", None)
             except Exception:
                 pass
 
-        tree.bind('<ButtonPress-1>', _on_tree_button_press)
-        tree.bind('<B1-Motion>', _on_tree_b1_motion)
-        tree.bind('<ButtonRelease-1>', _on_tree_button_release)
+        tree.bind("<ButtonPress-1>", _on_tree_button_press)
+        tree.bind("<B1-Motion>", _on_tree_b1_motion)
+        tree.bind("<ButtonRelease-1>", _on_tree_button_release)
     except Exception:
         pass
 
     # bind style controls (if present)
     try:
         if cmb_line_color is not None:
-            cmb_line_color.bind('<<ComboboxSelected>>', _on_style_change)
+            cmb_line_color.bind("<<ComboboxSelected>>", _on_style_change)
         if cmb_point_color is not None:
-            cmb_point_color.bind('<<ComboboxSelected>>', _on_style_change)
+            cmb_point_color.bind("<<ComboboxSelected>>", _on_style_change)
         if cmb_highlight_color is not None:
-            cmb_highlight_color.bind('<<ComboboxSelected>>', _on_style_change)
+            cmb_highlight_color.bind("<<ComboboxSelected>>", _on_style_change)
         if sp_line_width is not None:
-            sp_line_width.bind('<FocusOut>', _on_style_change)
-            sp_line_width.bind('<Return>', _on_style_change)
+            sp_line_width.bind("<FocusOut>", _on_style_change)
+            sp_line_width.bind("<Return>", _on_style_change)
     except Exception:
         pass
 
@@ -869,7 +951,9 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             # re-insert into state and table
             for ap in last:
                 try:
-                    item_id = state["points_table"].insert("", "end", values=(f"{ap['x']:.6f}", f"{ap['y']:.6f}", ""))
+                    item_id = state["points_table"].insert(
+                        "", "end", values=(f"{ap['x']:.6f}", f"{ap['y']:.6f}", "")
+                    )
                     # update item id in ap to new one and append
                     ap_copy = {"x": ap["x"], "y": ap["y"], "item": item_id}
                     state["added_points"].append(ap_copy)
@@ -898,6 +982,14 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                             cw.draw_idle()
                     except Exception:
                         pass
+                    try:
+                        _update_overlay_colors()
+                    except Exception:
+                        pass
+                    try:
+                        _update_lengths_and_line()
+                    except Exception:
+                        pass
                 else:
                     xs = state.get("xs", [])
                     ys = state.get("ys", [])
@@ -917,8 +1009,9 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             if not children:
                 messagebox.showinfo("情報", "エクスポートする行がありません")
                 return
-            p = filedialog.asksaveasfilename(defaultextension=".csv",
-                                             filetypes=[("CSV files", "*.csv")])
+            p = filedialog.asksaveasfilename(
+                defaultextension=".csv", filetypes=[("CSV files", "*.csv")]
+            )
             if not p:
                 return
             # build map of item->point to keep numeric precision and order
@@ -933,19 +1026,25 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             messagebox.showinfo("保存完了", f"CSV を保存しました: {p}")
         except Exception as e:
             try:
-                messagebox.showerror("エラー", f"CSV エクスポート中にエラーが発生しました: {e}")
+                messagebox.showerror(
+                    "エラー", f"CSV エクスポート中にエラーが発生しました: {e}"
+                )
             except Exception:
                 pass
 
     def import_points_csv():
         try:
-            p = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv"), ("All files", "*")])
+            p = filedialog.askopenfilename(
+                filetypes=[("CSV files", "*.csv"), ("All files", "*")]
+            )
             if not p:
                 return
             # ask user whether to append or replace
             # Yes -> replace (置換), No -> append (追加)
             try:
-                do_replace = messagebox.askyesno("CSV インポート", "既存の点を置換しますか？\nはい=置換、いいえ=追加")
+                do_replace = messagebox.askyesno(
+                    "CSV インポート", "既存の点を置換しますか？\nはい=置換、いいえ=追加"
+                )
             except Exception:
                 do_replace = False
 
@@ -973,7 +1072,9 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     if first:
                         first = False
                         # check if header-like
-                        if len(row) >= 2 and (row[0].strip().lower() == "x" or not _is_number(row[0])):
+                        if len(row) >= 2 and (
+                            row[0].strip().lower() == "x" or not _is_number(row[0])
+                        ):
                             continue
                     if not row:
                         continue
@@ -982,7 +1083,9 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                         y = float(row[1])
                     except Exception:
                         continue
-                    item_id = state["points_table"].insert("", "end", values=(f"{x:.6f}", f"{y:.6f}", ""))
+                    item_id = state["points_table"].insert(
+                        "", "end", values=(f"{x:.6f}", f"{y:.6f}", "")
+                    )
                     ap = {"x": x, "y": y, "item": item_id}
                     state["added_points"].append(ap)
                     added.append(ap)
@@ -1002,7 +1105,11 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                         except Exception:
                             pass
                         try:
-                            size_val = float(sp_overlay_point_size.get()) if sp_overlay_point_size is not None else cfg.get("overlay_point_size", 40)
+                            size_val = (
+                                float(sp_overlay_point_size.get())
+                                if sp_overlay_point_size is not None
+                                else cfg.get("overlay_point_size", 40)
+                            )
                             overlay.set_sizes(np.full((len(pts),), size_val))
                         except Exception:
                             pass
@@ -1034,7 +1141,9 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                 pass
         except Exception as e:
             try:
-                messagebox.showerror("エラー", f"CSV インポート中にエラーが発生しました: {e}")
+                messagebox.showerror(
+                    "エラー", f"CSV インポート中にエラーが発生しました: {e}"
+                )
             except Exception:
                 pass
 
@@ -1047,8 +1156,10 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             return False
 
     def open_file():
-        p = filedialog.askopenfilename(initialdir=initial_dir or os.getcwd(),
-                                       filetypes=[("PLY/XYZ files", "*.ply;*.plyz;*.xyz;*.*")])
+        p = filedialog.askopenfilename(
+            initialdir=initial_dir or os.getcwd(),
+            filetypes=[("PLY/XYZ files", "*.ply;*.plyz;*.xyz;*.*")],
+        )
         if not p:
             return
         state["path"] = p
@@ -1079,6 +1190,7 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     lbl_prog.config(text=f"{pct:.0f}%")
                 except Exception:
                     pass
+
             root.after(1, _update)
 
         def cancel_check():
@@ -1086,7 +1198,12 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
         def worker():
             try:
-                xs, ys, zs = parse_file(p, progress_callback=progress_cb, cancel_check=cancel_check)
+                # Use model's parsing wrapper which accepts our progress/cancel
+                # callbacks. This keeps parsing logic centralized in the model.
+                xs, ys, zs = parse_with_progress(
+                    p, progress_cb=progress_cb, cancel_event=cancel_event
+                )
+
                 def _done():
                     state["xs"] = xs
                     state["ys"] = ys
@@ -1095,10 +1212,17 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                         messagebox.showinfo("中断", "読み込みがキャンセルされました")
                     else:
                         lbl_prog.config(text="Done")
+
                 root.after(1, _done)
             except Exception as e:
-                def _err():
-                    messagebox.showerror("エラー", f"読み込み中にエラーが発生しました: {e}")
+                # Exception variables are cleared after the except block; bind
+                # the exception into a default argument so the scheduled
+                # callback can still reference it.
+                def _err(exc=e):
+                    messagebox.showerror(
+                        "エラー", f"読み込み中にエラーが発生しました: {exc}"
+                    )
+
                 root.after(1, _err)
 
         t = threading.Thread(target=worker, daemon=True)
@@ -1155,6 +1279,7 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     lbl_prog.config(text=f"{pct:.0f}%")
                 except Exception:
                     pass
+
             root.after(1, _update)
 
         def worker_preview():
@@ -1203,12 +1328,26 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                 progress_cb2(0)
                 return
             try:
-                fig = create_figure(xs2, ys2, zs2, title=os.path.basename(state.get("path", "")),
-                                    cmap=cmap, point_size=ps, plot_mode=plot_mode, gridsize=gs, downsample=None)
+                fig = create_figure(
+                    xs2,
+                    ys2,
+                    zs2,
+                    title=os.path.basename(state.get("path", "")),
+                    cmap=cmap,
+                    point_size=ps,
+                    plot_mode=plot_mode,
+                    gridsize=gs,
+                    downsample=None,
+                )
             except Exception as e:
-                def _err():
-                    messagebox.showerror("エラー", f"プレビュー作成中にエラーが発生しました: {e}")
+
+                # bind exception into callback default arg so it remains available
+                def _err(exc=e):
+                    messagebox.showerror(
+                        "エラー", f"プレビュー作成中にエラーが発生しました: {exc}"
+                    )
                     progress_cb2(0)
+
                 root.after(1, _err)
                 return
             progress_cb2(80)
@@ -1253,13 +1392,14 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
                 # connect mouse click handler to add red points
                 try:
-                        # attach standardized handlers which also keep mapping of tree-item ids
-                        state["canvas_widget"] = canvas
-                        _attach_canvas_handlers(canvas, fig)
+                    # attach standardized handlers which also keep mapping of tree-item ids
+                    state["canvas_widget"] = canvas
+                    _attach_canvas_handlers(canvas, fig)
                 except Exception:
                     pass
 
                 progress_cb2(100)
+
             root.after(1, _done)
 
         t = threading.Thread(target=worker_preview, daemon=True)
@@ -1269,8 +1409,10 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
         if not state.get("fig"):
             messagebox.showinfo("情報", "まずプレビューを表示してください")
             return
-        p = filedialog.asksaveasfilename(defaultextension=".png",
-                                         filetypes=[("PNG image", "*.png"), ("JPEG image", "*.jpg;*.jpeg")])
+        p = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG image", "*.png"), ("JPEG image", "*.jpg;*.jpeg")],
+        )
         if not p:
             return
 
@@ -1282,7 +1424,11 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             cfg4["downsample"] = ds
             cfg4["cmap"] = cmb_cmap.get()
             cfg4["plot_mode"] = "hexbin" if var_hex.get() else "scatter"
-            cfg4["gridsize"] = int(sp_gridsize.get()) if sp_gridsize.get() else cfg4.get("gridsize", 50)
+            cfg4["gridsize"] = (
+                int(sp_gridsize.get())
+                if sp_gridsize.get()
+                else cfg4.get("gridsize", 50)
+            )
             _save_config(cfg4)
         except Exception:
             pass
@@ -1301,20 +1447,26 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                 prog.start(20)
                 state.get("fig").savefig(p, dpi=200)
                 prog.stop()
+
                 def _ok():
                     btn_preview.config(state=tk.NORMAL)
                     btn_save.config(state=tk.NORMAL)
                     messagebox.showinfo("保存完了", f"保存しました: {p}")
                     for w in progress_frame.winfo_children():
                         w.destroy()
+
                 root.update_idletasks()
                 root.after(1, _ok)
             except Exception as e:
                 prog.stop()
-                def _err():
+
+                # bind exception into callback default arg so scheduled callback
+                # can access it after this except block exits
+                def _err(exc=e):
                     btn_preview.config(state=tk.NORMAL)
                     btn_save.config(state=tk.NORMAL)
-                    messagebox.showerror("エラー", f"保存中にエラーが発生しました: {e}")
+                    messagebox.showerror("エラー", f"保存中にエラーが発生しました: {exc}")
+
                 for w in progress_frame.winfo_children():
                     w.destroy()
                 root.after(1, _err)
@@ -1328,28 +1480,38 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
     lbl_path = ttk.Label(left_ctrl_frame, text="(no file)")
     lbl_path.grid(row=0, column=1, sticky=tk.W, padx=8)
 
-    ttk.Label(left_ctrl_frame, text="Point size:").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
+    ttk.Label(left_ctrl_frame, text="Point size:").grid(
+        row=1, column=0, sticky=tk.W, pady=(6, 0)
+    )
     sp_point_size = ttk.Entry(left_ctrl_frame, width=8)
     sp_point_size.insert(0, "1.0")
     sp_point_size.grid(row=1, column=1, sticky=tk.W, pady=(6, 0))
 
-    ttk.Label(left_ctrl_frame, text="Colormap:").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
+    ttk.Label(left_ctrl_frame, text="Colormap:").grid(
+        row=2, column=0, sticky=tk.W, pady=(6, 0)
+    )
     cmaps = sorted(plt.colormaps())
     cmb_cmap = ttk.Combobox(left_ctrl_frame, values=cmaps, width=20)
     cmb_cmap.set("jet")
     cmb_cmap.grid(row=2, column=1, sticky=tk.W, pady=(6, 0))
 
-    ttk.Label(left_ctrl_frame, text="Downsample (max points):").grid(row=4, column=0, sticky=tk.W, pady=(6, 0))
+    ttk.Label(left_ctrl_frame, text="Downsample (max points):").grid(
+        row=4, column=0, sticky=tk.W, pady=(6, 0)
+    )
     sp_downsample = ttk.Entry(left_ctrl_frame, width=10)
     sp_downsample.insert(0, "50000")
     sp_downsample.grid(row=4, column=1, sticky=tk.W, pady=(6, 0))
 
-    ttk.Label(left_ctrl_frame, text="Hexbin (density):").grid(row=5, column=0, sticky=tk.W, pady=(6, 0))
+    ttk.Label(left_ctrl_frame, text="Hexbin (density):").grid(
+        row=5, column=0, sticky=tk.W, pady=(6, 0)
+    )
     var_hex = tk.BooleanVar(value=False)
     chk_hex = ttk.Checkbutton(left_ctrl_frame, variable=var_hex, text="Use hexbin")
     chk_hex.grid(row=5, column=1, sticky=tk.W, pady=(6, 0))
 
-    ttk.Label(left_ctrl_frame, text="Hexbin gridsize:").grid(row=6, column=0, sticky=tk.W, pady=(6, 0))
+    ttk.Label(left_ctrl_frame, text="Hexbin gridsize:").grid(
+        row=6, column=0, sticky=tk.W, pady=(6, 0)
+    )
     sp_gridsize = ttk.Entry(left_ctrl_frame, width=10)
     sp_gridsize.insert(0, "50")
     sp_gridsize.grid(row=6, column=1, sticky=tk.W, pady=(6, 0))
@@ -1384,52 +1546,86 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
     try:
         # place Move Up / Move Down above Remove/Undo for intuitive ordering
         btn_move_up = ttk.Button(table_frame, text="Move Up", command=move_selected_up)
-        btn_move_up.grid(row=2, column=0, columnspan=2, sticky=tk.EW, pady=(6,0), padx=(0,4))
-        btn_move_down = ttk.Button(table_frame, text="Move Down", command=move_selected_down)
-        btn_move_down.grid(row=3, column=0, columnspan=2, sticky=tk.EW, pady=(6,0), padx=(0,4))
+        btn_move_up.grid(
+            row=2, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0), padx=(0, 4)
+        )
+        btn_move_down = ttk.Button(
+            table_frame, text="Move Down", command=move_selected_down
+        )
+        btn_move_down.grid(
+            row=3, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0), padx=(0, 4)
+        )
 
-        btn_remove = ttk.Button(table_frame, text="Remove Selected", command=remove_selected_points)
-        btn_remove.grid(row=4, column=0, columnspan=2, sticky=tk.EW, pady=(6,0), padx=(0,4))
+        btn_remove = ttk.Button(
+            table_frame, text="Remove Selected", command=remove_selected_points
+        )
+        btn_remove.grid(
+            row=4, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0), padx=(0, 4)
+        )
         # place Undo under Remove (same column)
         btn_undo = ttk.Button(table_frame, text="Undo Remove", command=undo_remove)
-        btn_undo.grid(row=5, column=0, columnspan=2, sticky=tk.EW, pady=(6,0), padx=(0,4))
+        btn_undo.grid(
+            row=5, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0), padx=(0, 4)
+        )
     except Exception:
         pass
 
     try:
         lbl_total = ttk.Label(table_frame, text="Horizontal distance: 0.000000")
-        lbl_total.grid(row=8, column=0, columnspan=2, sticky=tk.W, pady=(6,0))
+        lbl_total.grid(row=8, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
         state["total_len_label"] = lbl_total
     except Exception:
         state["total_len_label"] = None
 
     # Styling controls: line color/width, point color, highlight color
     try:
-        common_colors = ["black","red","green","blue","yellow","magenta","cyan","orange","purple","brown","gray"]
-        ttk.Label(table_frame, text="Line color:" ).grid(row=9, column=0, sticky=tk.W, pady=(6,0))
+        common_colors = [
+            "black",
+            "red",
+            "green",
+            "blue",
+            "yellow",
+            "magenta",
+            "cyan",
+            "orange",
+            "purple",
+            "brown",
+            "gray",
+        ]
+        ttk.Label(table_frame, text="Line color:").grid(
+            row=9, column=0, sticky=tk.W, pady=(6, 0)
+        )
         cmb_line_color = ttk.Combobox(table_frame, values=common_colors, width=12)
         cmb_line_color.set(cfg.get("line_color", "black"))
-        cmb_line_color.grid(row=9, column=1, sticky=tk.W, pady=(6,0))
+        cmb_line_color.grid(row=9, column=1, sticky=tk.W, pady=(6, 0))
 
-        ttk.Label(table_frame, text="Line width:").grid(row=10, column=0, sticky=tk.W, pady=(4,0))
+        ttk.Label(table_frame, text="Line width:").grid(
+            row=10, column=0, sticky=tk.W, pady=(4, 0)
+        )
         sp_line_width = ttk.Entry(table_frame, width=10)
         sp_line_width.insert(0, str(cfg.get("line_width", 1.0)))
-        sp_line_width.grid(row=10, column=1, sticky=tk.W, pady=(4,0))
+        sp_line_width.grid(row=10, column=1, sticky=tk.W, pady=(4, 0))
 
-        ttk.Label(table_frame, text="Point color:").grid(row=11, column=0, sticky=tk.W, pady=(4,0))
+        ttk.Label(table_frame, text="Point color:").grid(
+            row=11, column=0, sticky=tk.W, pady=(4, 0)
+        )
         cmb_point_color = ttk.Combobox(table_frame, values=common_colors, width=12)
         cmb_point_color.set(cfg.get("point_color", "red"))
-        cmb_point_color.grid(row=11, column=1, sticky=tk.W, pady=(4,0))
+        cmb_point_color.grid(row=11, column=1, sticky=tk.W, pady=(4, 0))
 
-        ttk.Label(table_frame, text="Highlight color:").grid(row=12, column=0, sticky=tk.W, pady=(4,0))
+        ttk.Label(table_frame, text="Highlight color:").grid(
+            row=12, column=0, sticky=tk.W, pady=(4, 0)
+        )
         cmb_highlight_color = ttk.Combobox(table_frame, values=common_colors, width=12)
         cmb_highlight_color.set(cfg.get("highlight_color", "blue"))
-        cmb_highlight_color.grid(row=12, column=1, sticky=tk.W, pady=(4,0))
+        cmb_highlight_color.grid(row=12, column=1, sticky=tk.W, pady=(4, 0))
         # overlay (red point) size
-        ttk.Label(table_frame, text="Point size:").grid(row=13, column=0, sticky=tk.W, pady=(4,0))
+        ttk.Label(table_frame, text="Point size:").grid(
+            row=13, column=0, sticky=tk.W, pady=(4, 0)
+        )
         sp_overlay_point_size = ttk.Entry(table_frame, width=10)
         sp_overlay_point_size.insert(0, str(cfg.get("overlay_point_size", 40)))
-        sp_overlay_point_size.grid(row=13, column=1, sticky=tk.W, pady=(4,0))
+        sp_overlay_point_size.grid(row=13, column=1, sticky=tk.W, pady=(4, 0))
     except Exception:
         cmb_line_color = None
         sp_line_width = None
@@ -1438,28 +1634,32 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
     # CSV import/export buttons (placed under Undo Remove)
     try:
-        btn_import_csv = ttk.Button(table_frame, text="Import CSV", command=import_points_csv)
-        btn_import_csv.grid(row=6, column=0, columnspan=2, sticky=tk.EW, pady=(6,0))
-        btn_export_csv = ttk.Button(table_frame, text="Export CSV", command=export_table_csv)
+        btn_import_csv = ttk.Button(
+            table_frame, text="Import CSV", command=import_points_csv
+        )
+        btn_import_csv.grid(row=6, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
+        btn_export_csv = ttk.Button(
+            table_frame, text="Export CSV", command=export_table_csv
+        )
         # place Export under Import and span both columns
-        btn_export_csv.grid(row=7, column=0, columnspan=2, sticky=tk.EW, pady=(6,0))
+        btn_export_csv.grid(row=7, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
     except Exception:
         pass
 
     # bind style control events to handler so changes are saved/applied
     try:
         if cmb_line_color is not None:
-            cmb_line_color.bind('<<ComboboxSelected>>', _on_style_change)
+            cmb_line_color.bind("<<ComboboxSelected>>", _on_style_change)
         if cmb_point_color is not None:
-            cmb_point_color.bind('<<ComboboxSelected>>', _on_style_change)
+            cmb_point_color.bind("<<ComboboxSelected>>", _on_style_change)
         if cmb_highlight_color is not None:
-            cmb_highlight_color.bind('<<ComboboxSelected>>', _on_style_change)
+            cmb_highlight_color.bind("<<ComboboxSelected>>", _on_style_change)
         if sp_line_width is not None:
-            sp_line_width.bind('<FocusOut>', _on_style_change)
-            sp_line_width.bind('<Return>', _on_style_change)
+            sp_line_width.bind("<FocusOut>", _on_style_change)
+            sp_line_width.bind("<Return>", _on_style_change)
         if sp_overlay_point_size is not None:
-            sp_overlay_point_size.bind('<FocusOut>', _on_style_change)
-            sp_overlay_point_size.bind('<Return>', _on_style_change)
+            sp_overlay_point_size.bind("<FocusOut>", _on_style_change)
+            sp_overlay_point_size.bind("<Return>", _on_style_change)
     except Exception:
         pass
 

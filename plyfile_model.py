@@ -1,24 +1,62 @@
-"""Utility functions for PlyFileToCavePlan.
+"""Model layer for PlyFileToCavePlan.
 
-切り出した内容: parse_xyz, parse_ply, parse_file, plot_xy, create_figure
+This module contains data/IO and parsing/plotting helpers. It is the
+central Model in the MVVM refactor and intentionally includes the
+lightweight parsers (ASCII PLY/XYZ) plus plotting helpers used by the GUI
+and CLI.
 """
+
 from __future__ import annotations
 
+import json
 import os
 import re
 import random
-from typing import List, Optional, Tuple
+import threading
+from typing import Callable, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
+import numpy as np
+
 
 FLOAT_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
 
 
-def parse_xyz(filepath: str,
-              progress_callback: Optional[callable] = None,
-              cancel_check: Optional[callable] = None) -> Tuple[List[float], List[float], Optional[List[float]]]:
-    """XYZファイルを読み、x,y,(z)のリストを返す。"""
+CONFIG_NAME = "plyfiletocaveplan_config.json"
+
+
+def get_config_path() -> str:
+    """Return the full path to the configuration file in the user's home dir."""
+    home = os.path.expanduser("~")
+    return os.path.join(home, CONFIG_NAME)
+
+
+def load_config() -> dict:
+    path = get_config_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_config(cfg: dict) -> None:
+    path = get_config_path()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def parse_xyz(
+    filepath: str,
+    progress_callback: Optional[callable] = None,
+    cancel_check: Optional[callable] = None,
+) -> Tuple[List[float], List[float], Optional[List[float]]]:
     xs: List[float] = []
     ys: List[float] = []
     zs: List[float] = []
@@ -85,10 +123,12 @@ def parse_xyz(filepath: str,
     return xs, ys, (zs if has_z else None)
 
 
-def parse_ply(filepath: str,
-              progress_callback: Optional[callable] = None,
-              cancel_check: Optional[callable] = None) -> Tuple[List[float], List[float], Optional[List[float]]]:
-    """Simple PLY (ASCII) parser: 頂点要素から x,y,(z) を抽出する。"""
+def parse_ply(
+    filepath: str,
+    progress_callback: Optional[callable] = None,
+    cancel_check: Optional[callable] = None,
+) -> Tuple[List[float], List[float], Optional[List[float]]]:
+    """Simple PLY (ASCII) parser: extract x,y,(z) from vertex elements."""
     xs: List[float] = []
     ys: List[float] = []
     zs: List[float] = []
@@ -103,14 +143,14 @@ def parse_ply(filepath: str,
         while True:
             line = f.readline()
             if not line:
-                raise ValueError("PLY header が見つかりませんでした")
-            header_lines.append(line.rstrip('\n'))
+                raise ValueError("PLY header not found")
+            header_lines.append(line.rstrip("\n"))
             l = line.strip()
             if l.startswith("format"):
                 if "ascii" in l.lower():
                     format_ascii = True
                 else:
-                    raise ValueError("バイナリ PLY はサポートされていません (ascii のみ)")
+                    raise ValueError("Only ascii PLY is supported")
             if l.startswith("element"):
                 parts = l.split()
                 if len(parts) >= 3 and parts[1] == "vertex":
@@ -126,14 +166,14 @@ def parse_ply(filepath: str,
                 break
 
         if not format_ascii:
-            raise ValueError("ASCII PLY のみサポートされています")
+            raise ValueError("Only ASCII PLY is supported")
 
         try:
             ix = property_names.index("x")
             iy = property_names.index("y")
             iz = property_names.index("z") if "z" in property_names else None
         except ValueError:
-            raise ValueError("PLY のプロパティに x,y が見つかりません")
+            raise ValueError("PLY properties x,y not found")
 
         try:
             total_size = os.path.getsize(filepath)
@@ -176,9 +216,13 @@ def parse_ply(filepath: str,
                         try:
                             pct = (f.tell() / total_size) * 100.0
                         except Exception:
-                            pct = min(100.0, (lines / (vertex_count or (lines+1))) * 100.0)
+                            pct = min(
+                                100.0, (lines / (vertex_count or (lines + 1))) * 100.0
+                            )
                     else:
-                        pct = min(100.0, (lines / (vertex_count or (lines+1))) * 100.0)
+                        pct = min(
+                            100.0, (lines / (vertex_count or (lines + 1))) * 100.0
+                        )
                     if pct - last_report >= 0.5 or pct == 100.0:
                         last_report = pct
                         try:
@@ -216,7 +260,7 @@ def parse_ply(filepath: str,
                         try:
                             pct = (f.tell() / total_size) * 100.0
                         except Exception:
-                            pct = min(100.0, (lines / (lines+1)) * 100.0)
+                            pct = min(100.0, (lines / (lines + 1)) * 100.0)
                     else:
                         pct = float(lines % 100)
                     if pct - last_report >= 0.5 or pct == 100.0:
@@ -235,22 +279,36 @@ def parse_ply(filepath: str,
     return xs, ys, (zs if has_z else None)
 
 
-def parse_file(filepath: str,
-               progress_callback: Optional[callable] = None,
-               cancel_check: Optional[callable] = None) -> Tuple[List[float], List[float], Optional[List[float]]]:
-    """拡張子に応じて適切なパーサに委譲する (ply または xyz)。"""
+def parse_file(
+    filepath: str,
+    progress_callback: Optional[callable] = None,
+    cancel_check: Optional[callable] = None,
+) -> Tuple[List[float], List[float], Optional[List[float]]]:
+    """Delegate to the right parser based on file extension."""
     ext = os.path.splitext(filepath)[1].lower()
     if ext == ".ply":
-        return parse_ply(filepath, progress_callback=progress_callback, cancel_check=cancel_check)
+        return parse_ply(
+            filepath, progress_callback=progress_callback, cancel_check=cancel_check
+        )
     else:
-        return parse_xyz(filepath, progress_callback=progress_callback, cancel_check=cancel_check)
+        return parse_xyz(
+            filepath, progress_callback=progress_callback, cancel_check=cancel_check
+        )
 
 
-def plot_xy(xs: List[float], ys: List[float], zs: Optional[List[float]] = None, *,
-            title: Optional[str] = None, outpath: Optional[str] = None,
-            cmap: str = "jet", point_size: float = 1.0,
-            plot_mode: str = "scatter", gridsize: int = 50, downsample: Optional[int] = None) -> None:
-    """XYを2Dで散布図プロットする。"""
+def plot_xy(
+    xs: List[float],
+    ys: List[float],
+    zs: Optional[List[float]] = None,
+    *,
+    title: Optional[str] = None,
+    outpath: Optional[str] = None,
+    cmap: str = "jet",
+    point_size: float = 1.0,
+    plot_mode: str = "scatter",
+    gridsize: int = 50,
+    downsample: Optional[int] = None,
+) -> None:
     fig, ax = plt.subplots(figsize=(8, 6))
     if zs is not None:
         try:
@@ -287,8 +345,6 @@ def plot_xy(xs: List[float], ys: List[float], zs: Optional[List[float]] = None, 
             fig.colorbar(hb, ax=ax).set_label("count")
 
     if outpath:
-        # 固定余白を使ってプロット領域をキャンバスいっぱいにする
-        # 値は比率（0.0-1.0）。必要に応じて調整してください。
         fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
         plt.savefig(outpath, dpi=200)
         print(f"Saved plot to: {outpath}")
@@ -297,10 +353,17 @@ def plot_xy(xs: List[float], ys: List[float], zs: Optional[List[float]] = None, 
         plt.show()
 
 
-def create_figure(xs: List[float], ys: List[float], zs: Optional[List[float]] = None,
-                  title: Optional[str] = None, cmap: str = "jet", point_size: float = 1.0,
-                  plot_mode: str = "scatter", gridsize: int = 50, downsample: Optional[int] = None) -> Figure:
-    """matplotlib Figure を返す（GUI で埋め込みや保存に使う）。"""
+def create_figure(
+    xs: List[float],
+    ys: List[float],
+    zs: Optional[List[float]] = None,
+    title: Optional[str] = None,
+    cmap: str = "jet",
+    point_size: float = 1.0,
+    plot_mode: str = "scatter",
+    gridsize: int = 50,
+    downsample: Optional[int] = None,
+) -> Figure:
     fig = Figure(figsize=(6, 4))
     ax = fig.subplots()
     if downsample and downsample > 0 and len(xs) > downsample:
@@ -334,7 +397,71 @@ def create_figure(xs: List[float], ys: List[float], zs: Optional[List[float]] = 
         ax.set_title(title)
     ax.grid(True)
     ax.set_aspect("equal", adjustable="datalim")
-    # キャンバス内の余白を固定（比率）にして、グラフ領域をキャンバスいっぱいに広げる
-    # 必要に応じてこの値を調整してください（left,right,top,bottom）。
     fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
     return fig
+
+
+def parse_with_progress(
+    filepath: str,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Parse a .ply/.xyz file and expose progress/cancel as a simple wrapper."""
+    # provide a callable cancel_check if caller passed an Event
+    cancel_check = None
+    if cancel_event is not None:
+        try:
+            cancel_check = cancel_event.is_set
+        except Exception:
+            cancel_check = None
+
+    xs, ys, zs = parse_file(
+        filepath, progress_callback=progress_cb, cancel_check=cancel_check
+    )
+    return np.array(xs), np.array(ys), (np.array(zs) if zs is not None else None)
+
+
+def export_points_csv(csv_path: str, points: List[Tuple[float, float, float]]) -> None:
+    try:
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write("x,y,z\n")
+            for x, y, z in points:
+                f.write(f"{x},{y},{z}\n")
+    except Exception:
+        raise
+
+
+def import_points_csv(csv_path: str) -> List[Tuple[float, float, float]]:
+    out: List[Tuple[float, float, float]] = []
+    try:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            header = f.readline()
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(",")
+                if len(parts) < 3:
+                    continue
+                try:
+                    x = float(parts[0])
+                    y = float(parts[1])
+                    z = float(parts[2])
+                    out.append((x, y, z))
+                except ValueError:
+                    continue
+    except Exception:
+        raise
+    return out
+
+
+class Model:
+    """In-memory model for the application."""
+
+    def __init__(self) -> None:
+        self.path: Optional[str] = None
+        self.xs: Optional[np.ndarray] = None
+        self.ys: Optional[np.ndarray] = None
+        self.zs: Optional[np.ndarray] = None
+        self.added_points: List[Tuple[float, float, float]] = []
+        self.remove_history: List[List[Tuple[float, float, float]]] = []
