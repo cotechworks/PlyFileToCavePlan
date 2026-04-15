@@ -1,6 +1,6 @@
 # PlyFileToCavePlan
 
-このスクリプトは PLY（ASCII）および従来の XYZ 形式のファイルを読み、XY 座標を2Dプロットします。
+このスクリプトは PLY形式（ASCII）および XYZ 形式のファイルを読み、XY 座標を2Dプロットします。
 
 ## インストール
 
