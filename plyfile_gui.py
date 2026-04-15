@@ -38,6 +38,7 @@ from plyfile_model import (
     parse_file,
     plot_xy,
 )
+from plyfile_viewmodel import ViewModel
 
 
 def launch_gui(initial_dir: Optional[str] = None) -> None:
@@ -69,6 +70,9 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
         "zs": None,
         "fig": None,
     }
+    # attach a ViewModel instance for point operations
+    vm = ViewModel()
+    state["vm"] = vm
 
     root = tk.Tk()
     root.title("PlyFileToCavePlan - GUI")
@@ -166,10 +170,24 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                     return
                 # insert into tree and state
                 try:
+                    # update viewmodel first, then insert corresponding tree item
+                    try:
+                        state.get("vm").append_point(x, y)
+                    except Exception:
+                        pass
                     item_id = state["points_table"].insert(
                         "", "end", values=(f"{x:.6f}", f"{y:.6f}", "")
                     )
-                    state["added_points"].append({"x": x, "y": y, "item": item_id})
+                    # rebuild state['added_points'] mapping from tree + viewmodel
+                    try:
+                        children = list(state["points_table"].get_children())
+                        pts = state.get("vm").get_points()
+                        new_list = []
+                        for cid, p in zip(children, pts):
+                            new_list.append({"x": p["x"], "y": p["y"], "item": cid})
+                        state["added_points"] = new_list
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 try:
@@ -286,6 +304,15 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                 state["overlay"] = overlay
                 # populate initial offsets
                 pts = state.get("added_points", [])
+                # synchronize ViewModel with current added_points
+                try:
+                    vm = state.get("vm")
+                    if vm is not None:
+                        vm.set_points([{"x": p["x"], "y": p["y"]} for p in pts])
+                    else:
+                        pass
+                except Exception:
+                    pass
                 if pts:
                     xs_o = [p["x"] for p in pts]
                     ys_o = [p["y"] for p in pts]
@@ -624,14 +651,29 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             tbl = state.get("points_table")
             if not tbl:
                 return
+            # build points list from tree values and update ViewModel to match
             children = list(tbl.get_children())
-            existing = {ap.get("item"): ap for ap in state.get("added_points", [])}
-            new_pts = []
+            pts = []
             for cid in children:
-                ap = existing.get(cid)
-                if ap:
-                    new_pts.append(ap)
-            state["added_points"] = new_pts
+                try:
+                    vals = tbl.item(cid, "values")
+                    if vals and len(vals) >= 2:
+                        x = float(vals[0])
+                        y = float(vals[1])
+                        pts.append({"x": x, "y": y})
+                except Exception:
+                    pass
+            # update viewmodel and state mapping
+            try:
+                vm = state.get("vm")
+                if vm is not None:
+                    vm.set_points(pts)
+                state["added_points"] = [
+                    {"x": p["x"], "y": p["y"], "item": cid}
+                    for cid, p in zip(children, pts)
+                ]
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -881,31 +923,42 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             sel = state["points_table"].selection()
             if not sel:
                 return
-            # remove from state list
-            removed_now = []
-            for item in sel:
-                try:
-                    # find and remove matching entry
-                    for i, ap in enumerate(list(state.get("added_points", []))):
-                        if ap.get("item") == item:
-                            # remove by index
-                            removed_now.append(state["added_points"][i])
-                            del state["added_points"][i]
-                            break
-                except Exception:
-                    pass
-                try:
-                    state["points_table"].delete(item)
-                except Exception:
-                    pass
-            # record removal in history for undo
-            if removed_now:
-                state["remove_history"].append(removed_now)
-            # update overlay offsets in-place for performance
+            # compute indices of selected items relative to current children
+            children = list(state["points_table"].get_children())
+            indices = sorted([children.index(s) for s in sel if s in children])
+            try:
+                vm = state.get("vm")
+                if vm is not None:
+                    vm.remove_points_by_indices(indices)
+            except Exception:
+                pass
+
+            # rebuild tree to match viewmodel points
+            try:
+                for item in list(state.get("points_table").get_children()):
+                    try:
+                        state["points_table"].delete(item)
+                    except Exception:
+                        pass
+                pts = state.get("vm").get_points()
+                new_added = []
+                for p in pts:
+                    try:
+                        item_id = state["points_table"].insert(
+                            "", "end", values=(f"{p['x']:.6f}", f"{p['y']:.6f}", "")
+                        )
+                        new_added.append({"x": p["x"], "y": p["y"], "item": item_id})
+                    except Exception:
+                        pass
+                state["added_points"] = new_added
+            except Exception:
+                pass
+
+            # update overlay and visuals
             try:
                 overlay = state.get("overlay")
+                pts = state.get("added_points", [])
                 if overlay is not None:
-                    pts = state.get("added_points", [])
                     if pts:
                         xs_o = [p["x"] for p in pts]
                         ys_o = [p["y"] for p in pts]
@@ -945,21 +998,38 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
     def undo_remove():
         try:
-            if not state.get("remove_history"):
+            # use ViewModel's remove history (we migrated history into vm)
+            vm = state.get("vm")
+            if vm is None or not getattr(vm, "remove_history", None):
                 return
-            last = state["remove_history"].pop()
-            # re-insert into state and table
-            for ap in last:
-                try:
-                    item_id = state["points_table"].insert(
-                        "", "end", values=(f"{ap['x']:.6f}", f"{ap['y']:.6f}", "")
-                    )
-                    # update item id in ap to new one and append
-                    ap_copy = {"x": ap["x"], "y": ap["y"], "item": item_id}
-                    state["added_points"].append(ap_copy)
-                except Exception:
-                    pass
-            # update overlay offsets in-place to show restored points
+            # delegate undo to viewmodel
+            try:
+                restored = vm.undo_remove()
+            except Exception:
+                restored = None
+
+            # rebuild tree from viewmodel points
+            try:
+                for item in list(state.get("points_table").get_children()):
+                    try:
+                        state["points_table"].delete(item)
+                    except Exception:
+                        pass
+                pts = state.get("vm").get_points()
+                new_added = []
+                for p in pts:
+                    try:
+                        item_id = state["points_table"].insert(
+                            "", "end", values=(f"{p['x']:.6f}", f"{p['y']:.6f}", "")
+                        )
+                        new_added.append({"x": p["x"], "y": p["y"], "item": item_id})
+                    except Exception:
+                        pass
+                state["added_points"] = new_added
+            except Exception:
+                pass
+
+            # update overlay and visuals
             try:
                 overlay = state.get("overlay")
                 if overlay is not None:
@@ -1009,8 +1079,15 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             if not children:
                 messagebox.showinfo("情報", "エクスポートする行がありません")
                 return
+            try:
+                cfg2 = _load_config()
+                initial = cfg2.get("last_dir", os.getcwd())
+            except Exception:
+                initial = os.getcwd()
             p = filedialog.asksaveasfilename(
-                defaultextension=".csv", filetypes=[("CSV files", "*.csv")]
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv")],
+                initialdir=initial,
             )
             if not p:
                 return
@@ -1034,8 +1111,14 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
 
     def import_points_csv():
         try:
+            try:
+                cfg2 = _load_config()
+                initial = cfg2.get("last_dir", os.getcwd())
+            except Exception:
+                initial = os.getcwd()
             p = filedialog.askopenfilename(
-                filetypes=[("CSV files", "*.csv"), ("All files", "*")]
+                filetypes=[("CSV files", "*.csv"), ("All files", "*")],
+                initialdir=initial,
             )
             if not p:
                 return
@@ -1092,6 +1175,13 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
             if not added:
                 messagebox.showinfo("情報", "インポートできる行がありませんでした")
                 return
+            # sync viewmodel with newly imported points
+            try:
+                vm = state.get("vm")
+                if vm is not None:
+                    vm.set_points([{"x": p["x"], "y": p["y"]} for p in state.get("added_points", [])])
+            except Exception:
+                pass
             # update overlay and visuals
             try:
                 overlay = state.get("overlay")
@@ -1366,6 +1456,12 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
                 # reset added points and clear table
                 state["added_points"] = []
                 try:
+                    vm = state.get("vm")
+                    if vm is not None:
+                        vm.set_points([])
+                except Exception:
+                    pass
+                try:
                     for item in state["points_table"].get_children():
                         state["points_table"].delete(item)
                 except Exception:
@@ -1409,9 +1505,15 @@ def launch_gui(initial_dir: Optional[str] = None) -> None:
         if not state.get("fig"):
             messagebox.showinfo("情報", "まずプレビューを表示してください")
             return
+        try:
+            cfg_save = _load_config()
+            initial = cfg_save.get("last_dir", os.getcwd())
+        except Exception:
+            initial = os.getcwd()
         p = filedialog.asksaveasfilename(
             defaultextension=".png",
             filetypes=[("PNG image", "*.png"), ("JPEG image", "*.jpg;*.jpeg")],
+            initialdir=initial,
         )
         if not p:
             return
